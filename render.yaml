@@ -1,0 +1,31 @@
+services:
+  # Node代理层
+  - type: web
+    name: wiseaudit-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEEPSEEK_API_KEY
+        sync: false  # 在Render控制台设置
+      - key: PYTHON_API_URL
+        value: http://localhost:8000
+      - key: PORT
+        value: 3001
+    healthCheckPath: /api/health
+
+  # Python计算引擎
+  - type: web
+    name: wiseaudit-python
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port 8000
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false  # 在Render控制台设置
+      - key: NODE_ENV
+        value: production
