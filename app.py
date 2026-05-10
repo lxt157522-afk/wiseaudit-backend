@@ -4,7 +4,8 @@ from pathlib import Path
 import os
 import shutil
 import uuid
-import requestsfrom fastapi import FastAPI, File, UploadFile, HTTPException
+import requests
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from audit_core import run_ar_audit
