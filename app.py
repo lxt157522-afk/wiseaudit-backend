@@ -38,6 +38,8 @@ def save_upload(file: UploadFile) -> str:
     with file_path.open("wb") as f:
         shutil.copyfileobj(file.file, f)
     return str(file_path)
+
+
 @app.get("/")
 def root():
     return {
@@ -58,6 +60,7 @@ def build_ai_conclusion(summary: dict) -> str:
 3. 包含风险分析和合理判断
 4. 控制在200到300字
 5. 直接输出正文，不要加标题，不要加引号
+
 数据如下：
 应收账款余额：{summary.get("ar_total")}
 坏账准备：{summary.get("bad_debt_total")}
@@ -76,7 +79,7 @@ def build_ai_conclusion(summary: dict) -> str:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-data = {
+    data = {
         "model": "deepseek-chat",
         "messages": [
             {"role": "system", "content": "你是专业审计师。"},
@@ -96,6 +99,8 @@ data = {
         return result["choices"][0]["message"]["content"]
     except Exception as e:
         return f"AI结论生成失败：{str(e)}"
+
+
 @app.post("/audit/ar/run")
 async def audit_ar_run(
     balance_file: UploadFile = File(...),
@@ -116,7 +121,7 @@ async def audit_ar_run(
         output_file_name = f"新-应收账款底稿（已填充）_{uuid.uuid4().hex}.xlsx"
         output_path = str(OUTPUT_DIR / output_file_name)
 
-result = run_ar_audit(
+        result = run_ar_audit(
             balance_path=balance_path,
             ar_support_path=ar_support_path,
             related_path=related_path,
@@ -137,7 +142,8 @@ result = run_ar_audit(
         result["download_url"] = f"/audit/ar/download/{filename}"
         result["download_full_url"] = None
         result["ai_conclusion"] = ai_conclusion
- return JSONResponse(
+
+        return JSONResponse(
             content=result,
             ensure_ascii=False
         )
@@ -158,6 +164,8 @@ def download_output(filename: str):
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
 @app.on_event("startup")
 async def startup_event():
     import asyncio
