@@ -1,20 +1,23 @@
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
 from pathlib import Path
+from openai import OpenAI
 import os
 import shutil
 import uuid
-import requestsfrom fastapi import FastAPI, File, UploadFile, HTTPException
+
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from audit_core import run_ar_audit
 
 app = FastAPI(title="AR Audit API", version="1.0.0-cloud")
 
+# 生产环境CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://wiseaudit-frontend-48af4f6q9-lxt157522-afks-projects.vercel.app",
+        "https://wiseaudit.vercel.app",
         "https://*.vercel.app",
         "http://localhost:3000",
         "http://localhost:5173",
@@ -24,8 +27,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API客户端配置
+client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com"
+)
+
+# 目录配置（Render使用持久化磁盘或临时存储）
 BASE_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = Path("/tmp/uploads")
+UPLOAD_DIR = Path("/tmp/uploads")  # Render推荐使用/tmp
 OUTPUT_DIR = Path("/tmp/outputs")
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,6 +47,8 @@ def save_upload(file: UploadFile) -> str:
     with file_path.open("wb") as f:
         shutil.copyfileobj(file.file, f)
     return str(file_path)
+
+
 @app.get("/")
 def root():
     return {
@@ -57,6 +69,7 @@ def build_ai_conclusion(summary: dict) -> str:
 3. 包含风险分析和合理判断
 4. 控制在200到300字
 5. 直接输出正文，不要加标题，不要加引号
+
 数据如下：
 应收账款余额：{summary.get("ar_total")}
 坏账准备：{summary.get("bad_debt_total")}
@@ -67,34 +80,20 @@ def build_ai_conclusion(summary: dict) -> str:
 期末余额：{summary.get("related_end_bal")}
 """
 
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        return "AI结论生成失败：未配置 DEEPSEEK_API_KEY"
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-data = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "system", "content": "你是专业审计师。"},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.7
-    }
-    
     try:
-        response = requests.post(
-            "https://api.deepseek.com/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=30
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是专业审计师。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
         )
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+        return response.choices[0].message.content or "AI未返回内容"
     except Exception as e:
         return f"AI结论生成失败：{str(e)}"
+
+
 @app.post("/audit/ar/run")
 async def audit_ar_run(
     balance_file: UploadFile = File(...),
@@ -115,7 +114,7 @@ async def audit_ar_run(
         output_file_name = f"新-应收账款底稿（已填充）_{uuid.uuid4().hex}.xlsx"
         output_path = str(OUTPUT_DIR / output_file_name)
 
-result = run_ar_audit(
+        result = run_ar_audit(
             balance_path=balance_path,
             ar_support_path=ar_support_path,
             related_path=related_path,
@@ -132,11 +131,13 @@ result = run_ar_audit(
         ai_conclusion = build_ai_conclusion(summary)
 
         filename = Path(output_path).name
-        
+
+        # 云部署：使用相对路径，让Node层补全完整URL
         result["download_url"] = f"/audit/ar/download/{filename}"
-        result["download_full_url"] = None
+        result["download_full_url"] = None  # 由Node层填充
         result["ai_conclusion"] = ai_conclusion
- return JSONResponse(
+
+        return JSONResponse(
             content=result,
             ensure_ascii=False
         )
@@ -157,12 +158,16 @@ def download_output(filename: str):
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+# 定期清理临时文件（防止磁盘占满）
 @app.on_event("startup")
 async def startup_event():
     import asyncio
     async def cleanup():
         while True:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(3600)  # 每小时清理一次
+            # 清理超过24小时的文件
             cutoff = asyncio.get_event_loop().time() - 86400
             for f in UPLOAD_DIR.glob("*"):
                 if f.stat().st_mtime < cutoff:
